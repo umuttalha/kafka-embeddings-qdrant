@@ -1,0 +1,4 @@
+kafka-python
+sentence-transformers
+qdrant-client
+python-dotenv

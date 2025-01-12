@@ -1,0 +1,312 @@
+---
+
+
+# Ortak paketlerin kurulumu için handler
+- name: Base Setup
+  hosts: all
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted
+        daemon_reload: yes
+
+
+
+# Kafka Sunucusu Kurulumu
+- hosts: kafka_servers
+  become: yes
+  collections:
+    - community.docker
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install dependencies
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+        state: present
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose
+        state: present
+        update_cache: yes
+
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Create kafka directory
+      file:
+        path: /opt/kafka
+        state: directory
+        mode: '0755'
+
+    - name: Copy kafka docker-compose file
+      template:
+        src: templates/kafka-docker-compose.yml.j2
+        dest: /opt/kafka/docker-compose.yml
+        mode: '0644'
+      vars:
+        kafka_host: "{{ ansible_host }}"
+
+    - name: Run docker-compose for Kafka
+      shell: |
+        cd /opt/kafka
+        docker-compose up -d
+      args:
+        creates: /opt/kafka/.docker-compose-up
+
+    - name: Mark docker-compose as run
+      file:
+        path: /opt/kafka/.docker-compose-up
+        state: touch
+
+- hosts: qdrant_servers
+  become: yes
+  collections:
+    - community.docker
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install dependencies
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+        state: present
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose
+        state: present
+        update_cache: yes
+
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Create qdrant directory
+      file:
+        path: /opt/qdrant
+        state: directory
+        mode: '0755'
+
+    - name: Copy qdrant docker-compose file
+      template:
+        src: templates/qdrant-docker-compose.yml.j2
+        dest: /opt/qdrant/docker-compose.yml
+        mode: '0644'
+
+    - name: Run docker-compose for Qdrant
+      shell: |
+        cd /opt/qdrant
+        docker-compose up -d
+      args:
+        creates: /opt/qdrant/.docker-compose-up
+
+    - name: Mark docker-compose as run
+      file:
+        path: /opt/qdrant/.docker-compose-up
+        state: touch
+
+# Python Consumer Sunucusu Kurulumu
+- hosts: python_servers
+  become: yes
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Python and dependencies
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+          - git
+        state: present
+
+    - name: Create application directory
+      file:
+        path: /opt/consumer
+        state: directory
+        mode: '0755'
+
+    - name: Copy Python application files
+      copy:
+        src: ../python-consumer/
+        dest: /opt/consumer/
+        mode: '0644'
+
+    - name: Create Python virtual environment
+      command: python3 -m venv /opt/consumer/venv
+      args:
+        creates: /opt/consumer/venv
+
+    - name: Install Python requirements
+      pip:
+        requirements: /opt/consumer/requirements.txt
+        virtualenv: /opt/consumer/venv
+        virtualenv_python: python3
+
+    - name: Create .env file for Python Consumer
+      template:
+        src: templates/python.env.j2
+        dest: /opt/consumer/.env
+        mode: '0644'
+      vars:
+        kafka_host: "{{ hostvars['kafka1']['ansible_host'] }}"
+        qdrant_host: "{{ hostvars['qdrant1']['ansible_host'] }}"
+
+    - name: Copy Python service file
+      template:
+        src: templates/python-consumer.service.j2
+        dest: /etc/systemd/system/python-consumer.service
+        mode: '0644'
+
+    - name: Enable and start Python consumer service
+      systemd:
+        name: python-consumer
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+
+- hosts: golang_servers
+  become: yes
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install dependencies
+      apt:
+        name:
+          - wget
+          - git
+        state: present
+
+    - name: Download Go
+      get_url:
+        url: https://go.dev/dl/go1.23.0.linux-amd64.tar.gz
+        dest: /tmp/go1.23.0.linux-amd64.tar.gz
+
+    - name: Extract Go
+      unarchive:
+        src: /tmp/go1.23.0.linux-amd64.tar.gz
+        dest: /usr/local
+        remote_src: yes
+
+    - name: Set Go environment variables
+      lineinfile:
+        path: /etc/profile
+        line: "{{ item }}"
+      with_items:
+        - 'export PATH=$PATH:/usr/local/go/bin'
+        - 'export GOPATH=/root/go'
+        - 'export GOBIN=/usr/local/go/bin'
+
+    - name: Create application directory
+      file:
+        path: /opt/producer
+        state: directory
+        mode: '0755'
+
+    - name: Copy Golang application files
+      copy:
+        src: ../golang-producer/
+        dest: /opt/producer/
+        mode: '0644'
+
+    - name: Create .env file for Golang Producer
+      template:
+        src: templates/golang.env.j2
+        dest: /opt/producer/.env
+        mode: '0644'
+      vars:
+        kafka_host: "{{ hostvars['kafka1']['ansible_host'] }}"
+
+    - name: Build Golang application
+      shell: |
+        source /etc/profile
+        cd /opt/producer
+        go mod tidy
+        go build -o producer
+      args:
+        executable: /bin/bash
+
+    - name: Copy Golang service file
+      template:
+        src: templates/golang-producer.service.j2
+        dest: /etc/systemd/system/golang-producer.service
+        mode: '0644'
+
+    - name: Enable and start Golang producer service
+      systemd:
+        name: golang-producer
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+
+# Monitoring Kurulumu (opsiyonel)
+- hosts: all
+  become: yes
+  tasks:
+    - name: Install node exporter
+      apt:
+        name: prometheus-node-exporter
+        state: present
+
+    - name: Start node exporter
+      systemd:
+        name: prometheus-node-exporter
+        state: started
+        enabled: yes

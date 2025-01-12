@@ -1,0 +1,15 @@
+[Unit]
+Description=Python Kafka Consumer Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/consumer
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/consumer/venv/bin/python consumer.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
