@@ -61,3 +61,8 @@ ssh_key_name = ""
    - Use Terraform to provision the infrastructure before running the Ansible playbook.
 
 This setup allows for efficient deployment and management of Kafka, Qdrant, and supporting services.
+
+
+noramlly in this use case using rest or grpc will be more suitable but this is just demo play
+
+playbook.yml can be split small parts

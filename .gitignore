@@ -1,5 +1,5 @@
 myenv
 inventory.yml
 terraform.tfvars
-terraform.tfstate
+terraform.tfstate*
 .terraform*
